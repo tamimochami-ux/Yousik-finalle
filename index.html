@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>YOUsics PRO</title>
+
+<style>
+/* ⚠️ STYLE INCHANGÉ */
+:root{
+  --bg:#04070d;
+  --card:#0c1420;
+  --card2:#101b2b;
+  --blue:#00bfff;
+  --blue2:#007bff;
+  --text:#ffffff;
+}
+body{margin:0;font-family:system-ui;background:radial-gradient(circle at top,#081426,var(--bg));color:var(--text);display:flex;justify-content:center;}
+#login{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:radial-gradient(circle,#000,#04070d);}
+#login h2{color:var(--blue);}
+#login input{margin:6px;padding:12px;border-radius:12px;border:1px solid #1a2a40;background:var(--card);color:white;width:240px;text-align:center;}
+#login button{padding:10px 18px;border:none;border-radius:12px;background:linear-gradient(45deg,var(--blue),var(--blue2));cursor:pointer;font-weight:bold;color:#000;}
+#app{display:none;width:100%;max-width:1200px;height:100vh;}
+#container{display:flex;height:100%;gap:14px;padding:12px;}
+#sidebar{width:260px;background:var(--card);padding:15px;border-radius:16px;}
+.item{padding:12px;margin:8px 0;background:var(--card2);border-radius:12px;cursor:pointer;display:flex;justify-content:space-between;}
+#content{flex:1;background:var(--card);padding:20px;border-radius:16px;overflow:auto;}
+.card{display:flex;align-items:center;gap:12px;padding:10px;background:var(--card2);border-radius:14px;margin:10px auto;cursor:pointer;max-width:650px;position:relative;}
+.card img{width:52px;height:52px;border-radius:12px;}
+.menuBtn{position:absolute;right:14px;font-size:26px;color:var(--blue);}
+#player{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);width:78%;max-width:820px;background:rgba(0,0,0,0.85);display:flex;align-items:center;gap:10px;padding:10px;border-radius:16px;}
+#now{min-width:120px;font-size:13px;}
+input[type=range]{flex:1;accent-color:var(--blue);}
+#player button{background:var(--card2);border:none;color:white;padding:7px 11px;border-radius:10px;}
+#fullPlayer{position:fixed;inset:0;background:radial-gradient(circle,#000,#04070d);display:none;justify-content:center;align-items:center;}
+#fullBox{background:var(--card);padding:26px;border-radius:20px;text-align:center;}
+#fullBox img{width:250px;height:250px;border-radius:18px;}
+#bigTitle{color:var(--blue);}
+</style>
+</head>
+
+<body>
+
+<div id="login">
+  <h2>YOUsics 💙</h2>
+  <input id="loginUser" placeholder="Username">
+  <input id="loginPass" type="password" placeholder="Password">
+  <button onclick="login()">Enter</button>
+</div>
+
+<div id="app">
+<div id="container">
+
+<div id="sidebar">
+<div class="item" onclick="goHome()">🎵 All Songs</div>
+<input type="file" id="fileInput" multiple accept="audio/*">
+<h3>PLAYLISTS</h3>
+<div id="playlistBox"></div>
+<button onclick="createPlaylist()">+ Playlist</button>
+</div>
+
+<div id="content">
+<h2 id="title">All Songs</h2>
+<div id="grid"></div>
+</div>
+
+</div>
+</div>
+
+<div id="player">
+<div id="now">Nothing</div>
+<input type="range" id="progressBar">
+<div>
+<button onclick="prev()">⏮</button>
+<button onclick="toggle()">▶</button>
+<button onclick="next()">⏭</button>
+</div>
+</div>
+
+<div id="fullPlayer">
+<div id="fullBox">
+<img id="bigImg">
+<h2 id="bigTitle"></h2>
+<input type="range" id="progress">
+<div>
+<button onclick="prev()">⏮</button>
+<button onclick="toggle()">▶</button>
+<button onclick="next()">⏭</button>
+</div>
+<button onclick="closeFull()">Close</button>
+</div>
+</div>
+
+<audio id="audio"></audio>
+
+<script>
+
+/* ===== INDEXEDDB ===== */
+let db;
+let dbReady=false;
+
+const request = indexedDB.open("yousicsDB", 1);
+
+request.onupgradeneeded = e=>{
+  db = e.target.result;
+  db.createObjectStore("songs", {keyPath:"id", autoIncrement:true});
+};
+
+request.onsuccess = e=>{
+  db = e.target.result;
+  dbReady=true;
+};
+
+/* SAVE */
+function saveSong(file, name, img){
+  return new Promise(res=>{
+    let tx = db.transaction("songs","readwrite");
+    let store = tx.objectStore("songs");
+
+    let req = store.add({name,file,img});
+    req.onsuccess = ()=>res(req.result);
+  });
+}
+
+/* GET */
+function getSongs(){
+  return new Promise(res=>{
+    let tx = db.transaction("songs","readonly");
+    let store = tx.objectStore("songs");
+    let req = store.getAll();
+    req.onsuccess = ()=>res(req.result);
+  });
+}
+
+/* ===== APP ===== */
+let songs=[];
+
+/* LOGIN */
+function login(){
+  const u=document.getElementById("loginUser").value.trim();
+  const p=document.getElementById("loginPass").value.trim();
+
+  let users=JSON.parse(localStorage.getItem("users")||"{}");
+
+  if(!users[u]) users[u]={pass:p};
+  if(users[u].pass!==p) return alert("Wrong password");
+
+  localStorage.setItem("users",JSON.stringify(users));
+  localStorage.setItem("currentUser",u);
+
+  startApp();
+}
+
+window.onload=()=>{
+  let u=localStorage.getItem("currentUser");
+  if(u) startApp();
+};
+
+/* START */
+async function startApp(){
+
+  // 🔥 ATTENTE DB READY (FIX)
+  while(!dbReady){
+    await new Promise(r=>setTimeout(r,50));
+  }
+
+  document.getElementById("login").style.display="none";
+  document.getElementById("app").style.display="block";
+
+  songs = await getSongs();
+  render();
+}
+
+/* UPLOAD FIX */
+fileInput.onchange=async e=>{
+  for(let f of e.target.files){
+
+    let img="https://picsum.photos/200?"+Math.random();
+
+    await saveSong(f, f.name, img);
+  }
+
+  // 🔥 recharge depuis DB (FIX)
+  songs = await getSongs();
+  render();
+};
+
+/* PLAY */
+function play(i){
+  let song=songs[i];
+  let url = URL.createObjectURL(song.file);
+
+  audio.src=url;
+  audio.play();
+
+  now.innerText=song.name;
+  bigTitle.innerText=song.name;
+  bigImg.src=song.img;
+
+  fullPlayer.style.display="flex";
+}
+
+function toggle(){audio.paused?audio.play():audio.pause();}
+function next(){play((current+1)%songs.length);}
+function prev(){play((current-1+songs.length)%songs.length);}
+
+/* RENDER */
+function render(){
+  grid.innerHTML="";
+  songs.forEach((s,i)=>{
+    let d=document.createElement("div");
+    d.className="card";
+    d.innerHTML=`
+      <img src="${s.img}">
+      <div>${s.name}</div>
+      <span class="menuBtn">⋮</span>
+    `;
+    d.onclick=()=>play(i);
+    grid.appendChild(d);
+  });
+}
+
+function goHome(){render();}
+
+</script>
+
+</body>
+</html>
